@@ -1,0 +1,37 @@
+name: Genre-Zuordnung
+
+on:
+  workflow_dispatch:  # manuell im Actions-Tab starten
+
+jobs:
+  genre:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350  # GitHub-Maximum ist 360 Minuten
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Abhängigkeiten installieren
+        run: pip install -r requirements.txt
+
+      - name: Genres ermitteln
+        env:
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+          INPUT_FILE: Ausgabe Spotify.xlsx
+          OUTPUT_FILE: songs_mit_genre.tsv
+        run: python genre_lookup.py
+
+      - name: Ergebnis als Artefakt speichern
+        if: always()  # auch bei Abbruch speichern
+        uses: actions/upload-artifact@v4
+        with:
+          name: songs_mit_genre
+          path: songs_mit_genre.tsv
