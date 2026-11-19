@@ -6,7 +6,6 @@ on:
 jobs:
   genre:
     runs-on: ubuntu-latest
-    timeout-minutes: 350  # GitHub-Maximum ist 360 Minuten
 
     steps:
       - name: Repository auschecken
@@ -18,11 +17,16 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
+      - name: Zwischenstand aus Cache laden
+        uses: actions/cache@v4
+        with:
+          path: songs_mit_genre.tsv
+          key: genre-progress-${{ github.run_id }}
+          restore-keys: |
+            genre-progress-
+
       - name: Abhängigkeiten installieren
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
-
-      - name: Eingabedatei prüfen
-        run: ls -la "Ausgabe Spotify.xlsx"
 
       - name: Genres ermitteln
         env:
@@ -34,7 +38,7 @@ jobs:
         run: python -u genre_lookup.py
 
       - name: Ergebnis als Artefakt speichern
-        if: always()  # auch bei Abbruch speichern
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: songs_mit_genre
