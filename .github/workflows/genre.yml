@@ -16,10 +16,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
+          cache: "pip"
 
       - name: Abhängigkeiten installieren
-        run: pip install -r requirements.txt
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Eingabedatei prüfen
+        run: ls -la "Ausgabe Spotify.xlsx"
 
       - name: Genres ermitteln
         env:
@@ -27,7 +30,8 @@ jobs:
           SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
           INPUT_FILE: Ausgabe Spotify.xlsx
           OUTPUT_FILE: songs_mit_genre.tsv
-        run: python genre_lookup.py
+          PYTHONUNBUFFERED: "1"
+        run: python -u genre_lookup.py
 
       - name: Ergebnis als Artefakt speichern
         if: always()  # auch bei Abbruch speichern
@@ -35,3 +39,4 @@ jobs:
         with:
           name: songs_mit_genre
           path: songs_mit_genre.tsv
+          if-no-files-found: warn
