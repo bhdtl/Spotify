@@ -1,5 +1,5 @@
-import os
 import csv
+import os
 import time
 
 import pandas as pd
@@ -16,6 +16,10 @@ HEADER = ["Künstler", "Titel", "Genre"]
 
 session = requests.Session()
 token = None
+
+
+def log(msg):
+    print(msg, flush=True)
 
 
 def get_token():
@@ -43,22 +47,31 @@ def api_get(path, params=None):
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=30,
             )
-        except requests.RequestException:
-            time.sleep(2 ** attempt)
+        except requests.RequestException as exc:
+            wait_sec = 2 ** attempt
+            log(f"[WARN] Netzwerkfehler bei {path} (Versuch {attempt + 1}/6): {exc} -> warte {wait_sec}s")
+            time.sleep(wait_sec)
             continue
 
         if r.status_code == 200:
             return r.json()
         if r.status_code == 401:  # Token abgelaufen
+            log("[INFO] Spotify-Token abgelaufen, erneuere Token...")
             token = get_token()
             continue
         if r.status_code == 429:  # Rate Limit
-            time.sleep(int(r.headers.get("Retry-After", 2)) + 1)
+            retry_after = int(r.headers.get("Retry-After", 2)) + 1
+            log(f"[RATE-LIMIT] 429 erhalten bei {path} -> warte {retry_after}s")
+            time.sleep(retry_after)
             continue
         if r.status_code >= 500:
-            time.sleep(2 ** attempt)
+            wait_sec = 2 ** attempt
+            log(f"[WARN] Serverfehler {r.status_code} bei {path} -> warte {wait_sec}s")
+            time.sleep(wait_sec)
             continue
+        log(f"[INFO] Status {r.status_code} bei {path} -> überspringe")
         return None  # z. B. 403/404: nicht wiederholen
+    log(f"[WARN] Maximale Versuche erreicht für {path}")
     return None
 
 
@@ -86,18 +99,24 @@ def lookup_genre(artist, title):
     ]
     for q in queries:
         data = api_get("/search", {"q": q, "type": "track", "limit": 1})
-        items = data["tracks"]["items"] if data else []
+        items = data["tracks"]["items"] if data and "tracks" in data else []
         if items:
             genres = []
-            for a in items[0]["artists"]:
-                genres += genres_for_artist(a["id"])
+            for a in items[0].get("artists", []):
+                artist_id = a.get("id")
+                if artist_id:
+                    genres += genres_for_artist(artist_id)
             genres = list(dict.fromkeys(genres))  # Duplikate entfernen
             return "; ".join(genres) if genres else "keine Angabe"
     return "unbekannt"
 
 
 def load_songs(path):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Eingabedatei nicht gefunden: {path}")
     df = pd.read_excel(path, header=None, dtype=str).fillna("")
+    if df.empty:
+        return []
     # Kopfzeile erkennen und überspringen
     if str(df.iloc[0, 0]).strip().lower() in ("artist_names", "artist", "künstler"):
         df = df.iloc[1:]
@@ -121,15 +140,18 @@ def load_done(path):
 
 
 def main():
+    log(f"Starte Genre-Zuordnung mit Eingabedatei '{INPUT_FILE}' -> '{OUTPUT_FILE}'")
     songs = load_songs(INPUT_FILE)
     done = load_done(OUTPUT_FILE)
-    file_exists = os.path.exists(OUTPUT_FILE)
-    print(f"{len(songs)} Titel gefunden, {len(done)} bereits erledigt.")
+    file_exists = os.path.exists(OUTPUT_FILE) and os.path.getsize(OUTPUT_FILE) > 0
+    log(f"{len(songs)} Titel gefunden, {len(done)} bereits erledigt.")
 
+    processed_new = 0
     with open(OUTPUT_FILE, "a", encoding="utf-8", newline="") as f:
         writer = csv.writer(f, delimiter="\t")
         if not file_exists:
             writer.writerow(HEADER)
+            f.flush()
 
         for i, (artist, title) in enumerate(songs, 1):
             if (artist, title) in done:
@@ -137,11 +159,12 @@ def main():
             genre = lookup_genre(artist, title)
             writer.writerow([artist, title, genre])
             f.flush()  # sofort speichern, falls der Lauf abbricht
-            if i % 100 == 0:
-                print(f"{i}/{len(songs)} verarbeitet")
+            processed_new += 1
+            if processed_new % 25 == 0 or i % 100 == 0:
+                log(f"Fortschritt: {i}/{len(songs)} geprüft ({processed_new} neu geschrieben, {len(artist_cache)} Künstler gecacht)")
             time.sleep(0.1)
 
-    print("Fertig:", OUTPUT_FILE)
+    log(f"Fertig: {OUTPUT_FILE} ({processed_new} neue Titel geschrieben)")
 
 
 if __name__ == "__main__":
